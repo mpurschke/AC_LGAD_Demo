@@ -1,0 +1,51 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          fpgaload
+# Required-Start:    $local_fs
+# Default-Start:     5
+# Short-Description: Load the PL bitstream named in /etc/default/fpgaload
+### END INIT INFO
+#
+# The bitstream must be a .bit.bin (bootgen -process_bitstream bin) of a
+# design that contains processing_system7; otherwise Linux hangs (FIQ).
+# Keep it outside /lib/firmware (e.g. /opt/fpga): fpgautil copies the file
+# there and deletes /lib/firmware/<name> afterwards.
+
+BITSTREAM=
+[ -r /etc/default/fpgaload ] && . /etc/default/fpgaload
+STATE=/sys/class/fpga_manager/fpga0/state
+
+case "$1" in
+  start)
+    if [ -z "$BITSTREAM" ]; then
+      echo "fpgaload: no BITSTREAM set in /etc/default/fpgaload"
+      exit 0
+    fi
+    if [ ! -r "$BITSTREAM" ]; then
+      echo "fpgaload: $BITSTREAM not found"
+      exit 1
+    fi
+    # Linux switches FCLK0 off at boot ("clk: Disabling unused clocks"): no
+    # driver in the device tree claims it. Without it the AXI interconnect
+    # has no clock and the first register access hangs the whole bus.
+    # Bit 0 of FPGA0_THR_CNT (0xF8000178) is the gate the Zynq clock driver
+    # uses (1 = off). Proper fix later: fclk-enable in the PetaLinux device tree.
+    devmem 0xF8000178 32 0
+    echo -n "fpgaload: loading $BITSTREAM ... "
+    fpgautil -b "$BITSTREAM" -f Full > /dev/null 2>&1
+    cat $STATE
+    ;;
+  status)
+    echo "fpgaload: $(cat $STATE)"
+    ;;
+  stop|restart|reload|force-reload)
+    # nothing to undo; to load a different design, edit
+    # /etc/default/fpgaload and run "start" again
+    [ "$1" = stop ] || exec "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|status}"
+    exit 1
+    ;;
+esac
+exit 0

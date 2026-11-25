@@ -11,3 +11,6 @@ fw/clockInfo.txt
 # my own working notes and scratch files
 status.md
 xx.*
+
+# cross-compiled board tools
+sw/zdaq_dump

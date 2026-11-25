@@ -1,0 +1,43 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          zdaq-net
+# Required-Start:    fpgaload
+# Default-Start:     5
+# Short-Description: Add the DAQ address 192.168.80.100 + board id (SW1..0) to eth0
+### END INIT INFO
+#
+# Runs after fpgaload (rc5 S03): the switches are PL pins, so the board id can
+# only be read once the bitstream is loaded. The address is added next to the
+# one from DHCP, so the board stays reachable on the home LAN as well.
+# Board id = bits 5..4 of the STATUS register at 0x43C00008.
+
+IF=eth0
+STATUS=0x43C00008
+VERSION=0x43C00000
+
+case "$1" in
+  start|restart|reload|force-reload)
+    ver=$(devmem $VERSION 32)
+    case "$ver" in
+      0x5A44*) ;;
+      *) echo "zdaq-net: no DAQ firmware loaded (VERSION $ver)"; exit 0 ;;
+    esac
+    st=$(devmem $STATUS 32)
+    id=$(( (st >> 4) & 3 ))
+    master=$(( st & 1 ))
+    addr=192.168.80.$((100 + id))
+    ip -4 addr flush dev $IF label $IF:daq 2>/dev/null
+    ip addr add $addr/24 dev $IF label $IF:daq
+    echo "zdaq-net: board id $id, clock master $master, $addr on $IF"
+    ;;
+  stop)
+    ip -4 addr flush dev $IF label $IF:daq 2>/dev/null
+    ;;
+  status)
+    ip -4 addr show dev $IF label $IF:daq
+    ;;
+  *)
+    echo "usage: $0 {start|stop|status}"
+    exit 1
+    ;;
+esac
