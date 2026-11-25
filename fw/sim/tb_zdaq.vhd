@@ -115,30 +115,28 @@ begin
                ", expected " & integer'image(expect) severity failure;
     end procedure;
 
-    -- wait for one complete event and check it; returns its timestamp
-    procedure check_event(num : natural; flags : std_logic_vector(7 downto 0);
-                          n : natural; id : natural; ts : out unsigned(63 downto 0)) is
-      variable w0 : std_logic_vector(31 downto 0);
+    -- wait for one complete event (7 words) and check it; returns its timestamp
+    procedure check_event(num : natural; ts : out unsigned(63 downto 0)) is
+      type tags_t is array (4 to 6) of std_logic_vector(31 downto 0);
+      constant TAGS : tags_t := (x"FEEDC0DE", x"DECAFBAD", x"F0F0F0F0");
     begin
       for t in 1 to 100000 loop
-        exit when nw >= rd + 4 + n;
+        exit when nw >= rd + 7;
         wait until rising_edge(ts_clk);
       end loop;
-      assert nw >= rd + 4 + n report "event " & integer'image(num) & " did not arrive" severity failure;
-      w0 := x"EB" & std_logic_vector(to_unsigned(id, 8)) & flags & std_logic_vector(to_unsigned(n, 8));
-      assert words(rd) = w0 report "event " & integer'image(num) & ": bad header word" severity failure;
-      assert unsigned(words(rd+1)) = num
-        report "event number: got " & integer'image(to_integer(unsigned(words(rd+1)))) &
+      assert nw >= rd + 7 report "event " & integer'image(num) & " did not arrive" severity failure;
+      assert unsigned(words(rd)) = 28 report "event " & integer'image(num) & ": length word wrong" severity failure;
+      ts := unsigned(words(rd+2)) & unsigned(words(rd+1));
+      assert unsigned(words(rd+3)) = num
+        report "packet counter: got " & integer'image(to_integer(unsigned(words(rd+3)))) &
                ", expected " & integer'image(num) severity failure;
-      ts := unsigned(words(rd+3)) & unsigned(words(rd+2));
-      for i in 0 to n-1 loop
-        assert words(rd+4+i) = std_logic_vector(to_unsigned(num, 16)) & std_logic_vector(to_unsigned(i, 16))
-          report "event " & integer'image(num) & ": bad pattern word " & integer'image(i) severity failure;
+      for i in 4 to 6 loop
+        assert words(rd+i) = TAGS(i) report "event " & integer'image(num) & ": tag word " & integer'image(i) & " wrong" severity failure;
       end loop;
-      for i in 0 to 3+n loop
-        assert (lastw(rd+i) = '1') = (i = 3+n) report "event " & integer'image(num) & ": TLAST misplaced" severity failure;
+      for i in 0 to 6 loop
+        assert (lastw(rd+i) = '1') = (i = 6) report "event " & integer'image(num) & ": TLAST misplaced" severity failure;
       end loop;
-      rd := rd + 4 + n;
+      rd := rd + 7;
     end procedure;
 
     procedure press(i : natural; hold : time) is
@@ -165,34 +163,32 @@ begin
     end loop;
     assert v(1) = '1' report "MMCM did not lock" severity failure;
 
-    check_reg(16#00#, 16#5A440001#, "VERSION");
+    check_reg(16#00#, 16#5A440002#, "VERSION");
     check_reg(16#10#, 1_250_000, "TRAIN_PERIOD default");
-    check_reg(16#14#, 4, "NWORDS default");
     axi_read(16#08#, v);
     assert v(0) = '1' and v(5 downto 4) = "10" report "STATUS: master / board id wrong" severity failure;
 
     axi_write(16#10#, std_logic_vector(to_unsigned(PERIOD, 32)));
-    axi_write(16#14#, x"00000003");
     axi_write(16#04#, x"00000003");       -- enable + clear
     wait for 1 us;
 
-    -- 1. soft trigger: event 0, flags master + synced
+    -- 1. soft trigger: event 0
     axi_write(16#24#, x"00000001");
-    check_event(0, x"06", 3, 2, ts);
+    check_event(0, ts);
     report "soft trigger ok";
 
     -- 2. BTN0 with bounce: exactly one event
     press(0, 1 us);
-    check_event(1, x"06", 3, 2, ts);
+    check_event(1, ts);
     wait for 2 us;
     assert nw = rd report "BTN0 gave more than one event" severity failure;
     report "BTN0 ok";
 
     -- 3. BTN1 held for 3.5 periods: 4 events, PERIOD clocks apart
     press(1, (7 * PERIOD * TSYS) / 2);
-    check_event(2, x"06", 3, 2, ts_prev);
+    check_event(2, ts_prev);
     for k in 3 to 5 loop
-      check_event(k, x"06", 3, 2, ts);
+      check_event(k, ts);
       assert ts - ts_prev = PERIOD
         report "train spacing " & integer'image(to_integer(ts - ts_prev)) severity failure;
       ts_prev := ts;
@@ -202,16 +198,16 @@ begin
     report "BTN1 train ok";
 
     -- 4. back-pressure: trigger 6 gets stuck, 7 and 8 are dropped,
-    --    9 then carries the "drops before" flag
+    --    the next event is number 9 (the gap shows the drops)
     tready <= '0';
     for k in 1 to 3 loop
       axi_write(16#24#, x"00000001");
       wait for 200 ns;
     end loop;
     tready <= '1';
-    check_event(6, x"06", 3, 2, ts);
+    check_event(6, ts);
     axi_write(16#24#, x"00000001");
-    check_event(9, x"07", 3, 2, ts);
+    check_event(9, ts);
     wait for 500 ns;
     check_reg(16#18#, 10, "TRIG_COUNT");
     check_reg(16#1C#, 8,  "EVT_COUNT");
@@ -227,7 +223,7 @@ begin
     wait for 1 us;
     check_reg(16#18#, 10, "TRIG_COUNT after BTN0 on a consumer");
     axi_write(16#24#, x"00000001");
-    check_event(10, x"02", 3, 2, ts);
+    check_event(10, ts);
     report "consumer ok";
 
     -- 6. clear: counters back to zero, next event is number 0 again
@@ -236,7 +232,7 @@ begin
     check_reg(16#18#, 0, "TRIG_COUNT after clear");
     check_reg(16#20#, 0, "DROP_COUNT after clear");
     axi_write(16#24#, x"00000001");
-    check_event(0, x"02", 3, 2, ts);
+    check_event(0, ts);
     assert ts < 1000 report "timestamp not cleared" severity failure;
     report "clear ok";
 

@@ -24,9 +24,13 @@ Step 1 (one Zybo Z7-20, tested over JTAG, no Linux yet):
   is full is dropped and counted, the trigger logic never waits.
 - Tested on the board: 5 presses of BTN0 gave exactly 5 events; holding BTN1 for 2.3 s gave
   235 events, all exactly 10.000 ms apart, no drops.
+- Event payload, 7 words of 32 bit: length in bytes (28), 64-bit timestamp (low word first),
+  packet counter (= trigger number, so a dropped trigger shows as a gap), and the fixed tags
+  0xFEEDC0DE, 0xDECAFBAD, 0xF0F0F0F0.
+- Linux (PetaLinux 2024.2) on the board loads the bitstream at boot, takes the IP address
+  from the switches, and `sw/zdaq_dump` reads the events through /dev/mem.
 
-Next: Linux on the board with the IP address from the switches, the board server, then the
-second board with the clock over HDMI.
+Next: the board server (TCP, spec section 5), then the second board with the clock over HDMI.
 
 ## Board settings
 
@@ -50,6 +54,8 @@ second board with the clock over HDMI.
 | `fw/constr/zybo_z7.xdc` | pins |
 | `fw/build.tcl` | block design (PS7 + PL + event FIFO) and bitstream |
 | `fw/jtag_test.tcl` | test over JTAG with xsdb, without Linux |
+| `linux/rootfs_files/` | boot scripts for the board: `fpgaload` (bitstream, PL clock), `zdaq-net` (IP from the switches) |
+| `sw/zdaq_dump.cc` | reads registers and events on the board, first step towards the server |
 
 ## Building and testing
 

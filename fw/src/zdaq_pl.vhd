@@ -30,7 +30,7 @@ use xpm.vcomponents.all;
 --   0x08 STATUS       RO  bit0 master (SW3), bit1 MMCM locked, bits 5..4 board id, bit8 enable, bit9 drops since clear
 --   0x0C INPUTS       RO  bits 3..0 switches, bits 11..8 buttons (raw, synchronized)
 --   0x10 TRAIN_PERIOD RW  clocks of the shared clock between train triggers (default 1_250_000 = 10 ms)
---   0x14 NWORDS       RW  test-pattern words per event, 0..255 (default 4)
+--   0x14 (unused, reads 0)
 --   0x18 TRIG_COUNT   RO  triggers while enabled
 --   0x1C EVT_COUNT    RO  events sent
 --   0x20 DROP_COUNT   RO  triggers dropped
@@ -83,7 +83,7 @@ entity zdaq_pl is
 end entity;
 
 architecture rtl of zdaq_pl is
-  constant VERSION : std_logic_vector(31 downto 0) := x"5A440001";
+  constant VERSION : std_logic_vector(31 downto 0) := x"5A440002";
 
   attribute X_INTERFACE_INFO : string;
   attribute X_INTERFACE_PARAMETER : string;
@@ -105,10 +105,8 @@ architecture rtl of zdaq_pl is
   signal trig : std_logic;
   signal enable_ts, clear_ts, soft_ts : std_logic;
   signal period_ts : std_logic_vector(31 downto 0);
-  signal nwords_ts : std_logic_vector(7 downto 0);
   signal trig_cnt, evt_cnt, drop_cnt : unsigned(31 downto 0);
   signal dropped : std_logic;
-  signal board_id : std_logic_vector(7 downto 0);
   signal flash : unsigned(22 downto 0) := (others => '0');    -- 50 ms trigger flash
   signal beat  : unsigned(26 downto 0) := (others => '0');
 
@@ -117,7 +115,6 @@ architecture rtl of zdaq_pl is
   signal rdata : std_logic_vector(31 downto 0) := (others => '0');
   signal r_enable : std_logic := '0';
   signal r_period : std_logic_vector(31 downto 0) := std_logic_vector(to_unsigned(1_250_000, 32));
-  signal r_nwords : std_logic_vector(7 downto 0) := x"04";
   signal clear_pls, soft_pls : std_logic := '0';
   signal sw_a, btn_a : std_logic_vector(3 downto 0);
   signal st_ts, st_a : std_logic_vector(2 downto 0);   -- locked-independent status from the ts domain
@@ -165,8 +162,6 @@ begin
               din(3 downto 0) => btn, din(7 downto 4) => sw,
               dout(3 downto 0) => btn_db, dout(7 downto 4) => sw_db);
 
-  board_id <= "000000" & sw_db(1 downto 0);
-
   tg_i : entity work.trig_gen
     port map (clk => clk_ts, rst => rst_ts, allow => sw_db(3),
               btn_single => btn_db(0), btn_train => btn_db(1), soft => soft_ts,
@@ -174,8 +169,7 @@ begin
 
   eg_i : entity work.evt_gen
     port map (clk => clk_ts, rst => rst_ts, clear => clear_ts, enable => enable_ts,
-              trig => trig, board_id => board_id, master => sw_db(3),
-              nwords => unsigned(nwords_ts),
+              trig => trig,
               m_axis_tdata => m_axis_tdata, m_axis_tvalid => m_axis_tvalid,
               m_axis_tready => m_axis_tready, m_axis_tlast => m_axis_tlast,
               trig_count => trig_cnt, evt_count => evt_cnt, drop_count => drop_cnt,
@@ -205,11 +199,9 @@ begin
   ---------------------------------------------------------------- crossings
   -- AXI -> shared clock: quasi-static settings, and two pulses
   cdc_ctl : xpm_cdc_array_single
-    generic map (WIDTH => 41, SRC_INPUT_REG => 1)
-    port map (src_clk => s_axi_aclk, src_in(0) => r_enable,
-              src_in(32 downto 1) => r_period, src_in(40 downto 33) => r_nwords,
-              dest_clk => clk_ts, dest_out(0) => enable_ts,
-              dest_out(32 downto 1) => period_ts, dest_out(40 downto 33) => nwords_ts);
+    generic map (WIDTH => 33, SRC_INPUT_REG => 1)
+    port map (src_clk => s_axi_aclk, src_in(0) => r_enable, src_in(32 downto 1) => r_period,
+              dest_clk => clk_ts, dest_out(0) => enable_ts, dest_out(32 downto 1) => period_ts);
 
   cdc_clear : xpm_cdc_pulse
     generic map (RST_USED => 0)
@@ -261,7 +253,6 @@ begin
         bvalid   <= '0';
         r_enable <= '0';
         r_period <= std_logic_vector(to_unsigned(1_250_000, 32));
-        r_nwords <= x"04";
       else
         if awready = '0' and s_axi_awvalid = '1' and s_axi_wvalid = '1' and bvalid = '0' then
           awready <= '1';
@@ -276,7 +267,6 @@ begin
               r_enable  <= s_axi_wdata(0);
               clear_pls <= s_axi_wdata(1);
             when 4 => r_period <= s_axi_wdata;
-            when 5 => r_nwords <= s_axi_wdata(7 downto 0);
             when 9 => soft_pls <= '1';
             when others => null;
           end case;
@@ -309,7 +299,6 @@ begin
                                 8 => st_a(1), 9 => st_a(2), others => '0');
             when 3 => rdata <= x"00000" & btn_a & x"0" & sw_a;
             when 4 => rdata <= r_period;
-            when 5 => rdata <= x"000000" & r_nwords;
             when 6 => rdata <= trig_a;
             when 7 => rdata <= evt_a;
             when 8 => rdata <= drop_a;

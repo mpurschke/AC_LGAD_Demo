@@ -42,8 +42,7 @@ set ver [rd $REG]
 set st  [rd [expr {$REG + 0x08}]]
 puts [format "VERSION 0x%08X  STATUS 0x%08X  master=%d locked=%d board_id=%d" \
     $ver $st [expr {$st & 1}] [expr {($st >> 1) & 1}] [expr {($st >> 4) & 3}]]
-puts [format "INPUTS 0x%08X  TRAIN_PERIOD %d  NWORDS %d" \
-    [rd [expr {$REG + 0x0C}]] [rd [expr {$REG + 0x10}]] [rd [expr {$REG + 0x14}]]]
+puts [format "INPUTS 0x%08X  TRAIN_PERIOD %d" [rd [expr {$REG + 0x0C}]] [rd [expr {$REG + 0x10}]]]
 
 # read one event from the FIFO if there is one; returns the list of words
 proc get_event {} {
@@ -56,13 +55,14 @@ proc get_event {} {
 }
 
 proc show {w} {
-    set h [lindex $w 0]
-    set ts [expr {([lindex $w 3] << 32) | [lindex $w 2]}]
-    set flags [expr {($h >> 8) & 0xFF}]
-    set str [format "event %6d  board %d  flags 0x%02X  ts %14d (%.6f s)  N %d" \
-        [lindex $w 1] [expr {($h >> 16) & 0xFF}] $flags $ts [expr {$ts / 125.0e6}] [expr {$h & 0xFF}]]
-    if {(($h >> 24) & 0xFF) != 0xEB} { append str "  BAD MARKER" }
-    if {$flags & 1} { append str "  (drops before)" }
+    # event: length (bytes), timestamp low, high, packet counter, 3 tags
+    set ts [expr {([lindex $w 2] << 32) | [lindex $w 1]}]
+    set str [format "event %6d  ts %14d (%.6f s)  length %d" \
+        [lindex $w 3] $ts [expr {$ts / 125.0e6}] [lindex $w 0]]
+    if {[lindex $w 0] != 4 * [llength $w]} { append str "  LENGTH MISMATCH" }
+    foreach k {4 5 6} tag {0xFEEDC0DE 0xDECAFBAD 0xF0F0F0F0} {
+        if {[lindex $w $k] != $tag} { append str "  BAD TAG $k"; break }
+    }
     puts $str
 }
 
@@ -76,7 +76,7 @@ after 10
 set got 0
 while {[llength [set w [get_event]]] > 0} {
     show $w
-    if {[lindex $w 1] != $got || [llength $w] != 4 + ([lindex $w 0] & 0xFF)} { puts "  ** unexpected" }
+    if {[lindex $w 3] != $got || [llength $w] != 7} { puts "  ** unexpected" }
     incr got
 }
 puts [format "TRIG_COUNT %d  EVT_COUNT %d  DROP_COUNT %d" \
@@ -90,7 +90,7 @@ while {[clock seconds] < $t_end} {
     set w [get_event]
     if {[llength $w] == 0} { after 20; continue }
     show $w
-    set ts [expr {([lindex $w 3] << 32) | [lindex $w 2]}]
+    set ts [expr {([lindex $w 2] << 32) | [lindex $w 1]}]
     if {$prev_ts >= 0} { puts [format "      +%.3f ms" [expr {($ts - $prev_ts) / 125.0e3}]] }
     set prev_ts $ts
 }
