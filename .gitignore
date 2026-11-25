@@ -1,0 +1,13 @@
+# everything Vivado generates; build.tcl and sim.sh recreate it
+fw/out/
+fw/sim_run/
+fw/.Xil/
+fw/.gen/
+fw/clockInfo.txt
+*.log
+*.jou
+*.str
+
+# my own working notes and scratch files
+status.md
+xx.*
