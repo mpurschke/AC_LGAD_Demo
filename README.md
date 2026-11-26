@@ -11,15 +11,16 @@ ASICs. The board-side server and the RCDAQ plugin are designed to carry over unc
 only the part that reads from the firmware is board specific.
 
 The full design (clock distribution, SYNC and trigger, TCP protocol, board server, RCDAQ
-plugin, test plan) is in [spec.md](spec.md).
+plugin, test plan) is in [spec.md](spec.md). Messages, registers and commands at a glance:
+[docs/registers.md](docs/registers.md).
 
 ## Status
 
 Step 1 (one Zybo Z7-20, tested over JTAG, no Linux yet):
 - 64-bit timestamp counter and event builder on a 125 MHz clock from an MMCM, with the
   second MMCM input already in place for the HDMI clock of a consumer board.
-- Triggers from the buttons: BTN0 = one trigger, BTN1 = one trigger every 10 ms while held
-  (period adjustable), plus a soft trigger register.
+- Triggers from the buttons (BTN0 = one trigger, BTN1 = a train while held), a hardware
+  trigger on Pmod JE pin 1, a programmable pulser, and a soft trigger register.
 - Events go into a FIFO the processor reads over AXI; a trigger that comes while the FIFO
   is full is dropped and counted, the trigger logic never waits.
 - Tested on the board: 5 presses of BTN0 gave exactly 5 events; holding BTN1 for 2.3 s gave
@@ -30,7 +31,10 @@ Step 1 (one Zybo Z7-20, tested over JTAG, no Linux yet):
 - Linux (PetaLinux 2024.2) on the board loads the bitstream at boot, takes the IP address
   from the switches, and `sw/zdaq_dump` reads the events through /dev/mem.
 
-Next: the board server (TCP, spec section 5), then the second board with the clock over HDMI.
+- The board server sends the events over TCP: up to 200,000 events/s from the firmware reach
+  a PC without loss.
+
+Next: the RCDAQ plugin, then the second board with the clock over HDMI.
 
 ## Board settings
 
@@ -55,7 +59,8 @@ Next: the board server (TCP, spec section 5), then the second board with the clo
 | `fw/build.tcl` | block design (PS7 + PL + event FIFO) and bitstream |
 | `fw/jtag_test.tcl` | test over JTAG with xsdb, without Linux |
 | `linux/rootfs_files/` | boot scripts for the board: `fpgaload` (bitstream, PL clock), `zdaq-net` (IP from the switches) |
-| `sw/zdaq_dump.cc` | reads registers and events on the board, first step towards the server |
+| `sw/zdaq_dump.cc` | reads registers and events on the board, sets trigger sources and pulser |
+| `sw/server/` | TCP server for the board (simulated or firmware events) and a test client |
 
 ## Building and testing
 
