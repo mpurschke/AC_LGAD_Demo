@@ -16,6 +16,7 @@ architecture sim of tb_zdaq is
   signal sysclk, aclk : std_logic := '0';
   signal aresetn : std_logic := '0';
   signal btn, sw : std_logic_vector(3 downto 0) := (others => '0');
+  signal je : std_logic := '0';
   signal led : std_logic_vector(3 downto 0);
   signal r, g, b, eth : std_logic;
 
@@ -44,7 +45,7 @@ begin
   dut : entity work.zdaq_pl
     generic map (DEBOUNCE_TICK => 4)
     port map (
-      sysclk => sysclk, btn => btn, sw => sw, led => led,
+      sysclk => sysclk, btn => btn, sw => sw, je_trig => je, led => led,
       led6_r => r, led6_g => g, led6_b => b, eth_rst_b => eth,
       m_axis_aclk => ts_clk, m_axis_aresetn => ts_rstn,
       m_axis_tdata => tdata, m_axis_tvalid => tvalid, m_axis_tready => tready, m_axis_tlast => tlast,
@@ -163,7 +164,9 @@ begin
     end loop;
     assert v(1) = '1' report "MMCM did not lock" severity failure;
 
-    check_reg(16#00#, 16#5A440002#, "VERSION");
+    check_reg(16#00#, 16#5A440003#, "VERSION");
+    check_reg(16#14#, 3, "TRIG_SRC default");
+    check_reg(16#28#, 125_000, "PULSE_PERIOD default");
     check_reg(16#10#, 1_250_000, "TRAIN_PERIOD default");
     axi_read(16#08#, v);
     assert v(0) = '1' and v(5 downto 4) = "10" report "STATUS: master / board id wrong" severity failure;
@@ -235,6 +238,41 @@ begin
     check_event(0, ts);
     assert ts < 1000 report "timestamp not cleared" severity failure;
     report "clear ok";
+
+    -- 7. Pmod JE1: one event per rising edge, short or long pulse (back to clock master)
+    sw <= "1010";
+    wait for 1 us;
+    je <= '1';  wait for 20 ns;  je <= '0';
+    check_event(1, ts);
+    je <= '1';  wait for 2 us;   je <= '0';
+    check_event(2, ts);
+    wait for 1 us;
+    assert nw = rd report "JE1 gave more than one event per pulse" severity failure;
+    report "Pmod JE1 ok";
+
+    -- 8. source mask: only JE1 enabled, so BTN0 is ignored
+    axi_write(16#14#, x"00000002");
+    press(0, 1 us);
+    wait for 1 us;
+    assert nw = rd report "BTN0 triggered although masked" severity failure;
+    report "source mask ok";
+
+    -- 9. pulser: 5 triggers exactly PULSE_PERIOD apart, then off
+    axi_write(16#28#, std_logic_vector(to_unsigned(100, 32)));
+    axi_write(16#14#, x"00000004");
+    check_event(3, ts_prev);
+    for k in 4 to 7 loop
+      check_event(k, ts);
+      assert ts - ts_prev = 100
+        report "pulser spacing " & integer'image(to_integer(ts - ts_prev)) severity failure;
+      ts_prev := ts;
+    end loop;
+    axi_write(16#14#, x"00000000");
+    wait for 2 us;
+    rd := nw;                             -- skip events that came while switching off
+    wait for 2 us;
+    assert nw = rd report "pulser still running after switching it off" severity failure;
+    report "pulser ok";
 
     report "TB PASSED";
     done <= true;

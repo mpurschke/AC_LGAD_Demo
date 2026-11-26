@@ -68,9 +68,10 @@ connect_bd_intf_net [get_bd_intf_pins axis_fifo/M_AXIS] [get_bd_intf_pins evt_fi
 create_bd_port -dir I -type clk -freq_hz 125000000 sysclk
 create_bd_port -dir I -from 3 -to 0 btn
 create_bd_port -dir I -from 3 -to 0 sw
+create_bd_port -dir I je_trig
 create_bd_port -dir O -from 3 -to 0 led
 foreach p {led6_r led6_g led6_b eth_rst_b} { create_bd_port -dir O $p }
-foreach p {sysclk btn sw led led6_r led6_g led6_b eth_rst_b} {
+foreach p {sysclk btn sw je_trig led led6_r led6_g led6_b eth_rst_b} {
     connect_bd_net [get_bd_ports $p] [get_bd_pins zdaq/$p]
 }
 

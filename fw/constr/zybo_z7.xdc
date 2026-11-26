@@ -17,6 +17,9 @@ set_property -dict { PACKAGE_PIN P15 IOSTANDARD LVCMOS33 } [get_ports {sw[1]}]
 set_property -dict { PACKAGE_PIN W13 IOSTANDARD LVCMOS33 } [get_ports {sw[2]}]
 set_property -dict { PACKAGE_PIN T16 IOSTANDARD LVCMOS33 } [get_ports {sw[3]}]
 
+## Pmod JE pin 1: hardware trigger, 3.3 V LVCMOS, rising edge (JE has 200 ohm series resistors)
+set_property -dict { PACKAGE_PIN V12 IOSTANDARD LVCMOS33 PULLDOWN TRUE } [get_ports je_trig]
+
 ## LEDs: LD0 trigger, LD1 enabled, LD2 drops, LD3 heartbeat
 set_property -dict { PACKAGE_PIN M14 IOSTANDARD LVCMOS33 } [get_ports {led[0]}]
 set_property -dict { PACKAGE_PIN M15 IOSTANDARD LVCMOS33 } [get_ports {led[1]}]
@@ -32,5 +35,5 @@ set_property -dict { PACKAGE_PIN M17 IOSTANDARD LVCMOS33 } [get_ports led6_b]
 set_property -dict { PACKAGE_PIN E17 IOSTANDARD LVCMOS33 } [get_ports eth_rst_b]
 
 ## Buttons, switches and LEDs are asynchronous to everything (synchronized inside)
-set_false_path -from [get_ports {btn[*] sw[*]}]
+set_false_path -from [get_ports {btn[*] sw[*] je_trig}]
 set_false_path -to   [get_ports {led[*] led6_* eth_rst_b}]

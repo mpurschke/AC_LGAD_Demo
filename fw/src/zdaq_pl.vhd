@@ -19,7 +19,8 @@ use xpm.vcomponents.all;
 -- cable on a consumer) cannot hang the processor on a register access.
 --
 -- Switches: SW3 = clock master (on), SW1..0 = board id (also the IP address
--- 192.168.80.100 + id). BTN0 = one trigger, BTN1 = trigger train while held.
+-- 192.168.80.100 + id). BTN0 = one trigger, BTN1 = trigger train while held,
+-- Pmod JE1 = hardware trigger (3.3 V LVCMOS, rising edge), plus a pulser.
 -- LEDs: LD0 = trigger (50 ms flash), LD1 = run enabled, LD2 = drops since clear,
 -- LD3 = heartbeat of the shared clock. RGB LD6: red = MMCM not locked,
 -- blue = clock master, green = consumer.
@@ -30,11 +31,12 @@ use xpm.vcomponents.all;
 --   0x08 STATUS       RO  bit0 master (SW3), bit1 MMCM locked, bits 5..4 board id, bit8 enable, bit9 drops since clear
 --   0x0C INPUTS       RO  bits 3..0 switches, bits 11..8 buttons (raw, synchronized)
 --   0x10 TRAIN_PERIOD RW  clocks of the shared clock between train triggers (default 1_250_000 = 10 ms)
---   0x14 (unused, reads 0)
+--   0x14 TRIG_SRC     RW  trigger sources: bit0 buttons, bit1 Pmod JE1, bit2 pulser (default 0x3)
 --   0x18 TRIG_COUNT   RO  triggers while enabled
 --   0x1C EVT_COUNT    RO  events sent
 --   0x20 DROP_COUNT   RO  triggers dropped
 --   0x24 SOFT_TRIG    WO  write anything: one trigger (also on a consumer, for tests)
+--   0x28 PULSE_PERIOD RW  clocks of the shared clock between pulser triggers (default 125_000 = 1 kHz)
 entity zdaq_pl is
   generic (
     DEBOUNCE_TICK : positive := 125_000     -- 1 ms at 125 MHz; small in simulation
@@ -43,6 +45,7 @@ entity zdaq_pl is
     sysclk    : in  std_logic;                        -- 125 MHz, K17
     btn       : in  std_logic_vector(3 downto 0);
     sw        : in  std_logic_vector(3 downto 0);
+    je_trig   : in  std_logic;                        -- Pmod JE1, hardware trigger
     led       : out std_logic_vector(3 downto 0);
     led6_r    : out std_logic;
     led6_g    : out std_logic;
@@ -83,7 +86,7 @@ entity zdaq_pl is
 end entity;
 
 architecture rtl of zdaq_pl is
-  constant VERSION : std_logic_vector(31 downto 0) := x"5A440002";
+  constant VERSION : std_logic_vector(31 downto 0) := x"5A440003";
 
   attribute X_INTERFACE_INFO : string;
   attribute X_INTERFACE_PARAMETER : string;
@@ -104,7 +107,8 @@ architecture rtl of zdaq_pl is
   signal btn_db, sw_db : std_logic_vector(3 downto 0);
   signal trig : std_logic;
   signal enable_ts, clear_ts, soft_ts : std_logic;
-  signal period_ts : std_logic_vector(31 downto 0);
+  signal period_ts, pulse_ts : std_logic_vector(31 downto 0);
+  signal src_ts : std_logic_vector(2 downto 0);
   signal trig_cnt, evt_cnt, drop_cnt : unsigned(31 downto 0);
   signal dropped : std_logic;
   signal flash : unsigned(22 downto 0) := (others => '0');    -- 50 ms trigger flash
@@ -115,6 +119,8 @@ architecture rtl of zdaq_pl is
   signal rdata : std_logic_vector(31 downto 0) := (others => '0');
   signal r_enable : std_logic := '0';
   signal r_period : std_logic_vector(31 downto 0) := std_logic_vector(to_unsigned(1_250_000, 32));
+  signal r_pulse  : std_logic_vector(31 downto 0) := std_logic_vector(to_unsigned(125_000, 32));
+  signal r_src    : std_logic_vector(2 downto 0) := "011";
   signal clear_pls, soft_pls : std_logic := '0';
   signal sw_a, btn_a : std_logic_vector(3 downto 0);
   signal st_ts, st_a : std_logic_vector(2 downto 0);   -- locked-independent status from the ts domain
@@ -163,9 +169,9 @@ begin
               dout(3 downto 0) => btn_db, dout(7 downto 4) => sw_db);
 
   tg_i : entity work.trig_gen
-    port map (clk => clk_ts, rst => rst_ts, allow => sw_db(3),
-              btn_single => btn_db(0), btn_train => btn_db(1), soft => soft_ts,
-              period => unsigned(period_ts), trig => trig);
+    port map (clk => clk_ts, rst => rst_ts, allow => sw_db(3), src_mask => src_ts,
+              btn_single => btn_db(0), btn_train => btn_db(1), ext_in => je_trig, soft => soft_ts,
+              train_period => unsigned(period_ts), pulse_period => unsigned(pulse_ts), trig => trig);
 
   eg_i : entity work.evt_gen
     port map (clk => clk_ts, rst => rst_ts, clear => clear_ts, enable => enable_ts,
@@ -199,9 +205,11 @@ begin
   ---------------------------------------------------------------- crossings
   -- AXI -> shared clock: quasi-static settings, and two pulses
   cdc_ctl : xpm_cdc_array_single
-    generic map (WIDTH => 33, SRC_INPUT_REG => 1)
+    generic map (WIDTH => 68, SRC_INPUT_REG => 1)
     port map (src_clk => s_axi_aclk, src_in(0) => r_enable, src_in(32 downto 1) => r_period,
-              dest_clk => clk_ts, dest_out(0) => enable_ts, dest_out(32 downto 1) => period_ts);
+              src_in(64 downto 33) => r_pulse, src_in(67 downto 65) => r_src,
+              dest_clk => clk_ts, dest_out(0) => enable_ts, dest_out(32 downto 1) => period_ts,
+              dest_out(64 downto 33) => pulse_ts, dest_out(67 downto 65) => src_ts);
 
   cdc_clear : xpm_cdc_pulse
     generic map (RST_USED => 0)
@@ -253,6 +261,8 @@ begin
         bvalid   <= '0';
         r_enable <= '0';
         r_period <= std_logic_vector(to_unsigned(1_250_000, 32));
+        r_pulse  <= std_logic_vector(to_unsigned(125_000, 32));
+        r_src    <= "011";
       else
         if awready = '0' and s_axi_awvalid = '1' and s_axi_wvalid = '1' and bvalid = '0' then
           awready <= '1';
@@ -267,6 +277,8 @@ begin
               r_enable  <= s_axi_wdata(0);
               clear_pls <= s_axi_wdata(1);
             when 4 => r_period <= s_axi_wdata;
+            when 5 => r_src    <= s_axi_wdata(2 downto 0);
+            when 10 => r_pulse <= s_axi_wdata;
             when 9 => soft_pls <= '1';
             when others => null;
           end case;
@@ -299,6 +311,8 @@ begin
                                 8 => st_a(1), 9 => st_a(2), others => '0');
             when 3 => rdata <= x"00000" & btn_a & x"0" & sw_a;
             when 4 => rdata <= r_period;
+            when 5 => rdata <= x"0000000" & '0' & r_src;
+            when 10 => rdata <= r_pulse;
             when 6 => rdata <= trig_a;
             when 7 => rdata <= evt_a;
             when 8 => rdata <= drop_a;

@@ -1,11 +1,14 @@
 // zdaq_dump: read the DAQ demo registers and events on the Zybo through /dev/mem.
 // First step towards the board server; run as root.
 //
-//   zdaq_dump [-c] [-s n] [-w seconds] [-p period_ms]
+//   zdaq_dump [-c] [-s n] [-w seconds] [-p period_ms] [-m mask] [-f pulser_hz] [-q]
 //     -c     enable and clear (zero timestamp, counters), empty the FIFO
 //     -s n   fire n soft triggers
 //     -w s   print events for s seconds (default 0: only what is in the FIFO now)
 //     -p ms  set the BTN1 train period
+//     -m m   trigger sources: bit0 buttons, bit1 Pmod JE1, bit2 pulser
+//     -f hz  set the pulser rate (switch it on with -m 4 or similar)
+//     -q     no line per event, only the summary
 //
 // Build (static, so it does not depend on the libraries in the board's image), e.g. with
 // the ARM cross compiler that comes with Vitis:
@@ -35,6 +38,8 @@ constexpr int R_CONTROL = 0x04 / 4;
 constexpr int R_STATUS  = 0x08 / 4;
 constexpr int R_INPUTS  = 0x0C / 4;
 constexpr int R_PERIOD  = 0x10 / 4;
+constexpr int R_SRC     = 0x14 / 4;
+constexpr int R_PULSE   = 0x28 / 4;
 constexpr int R_TRIGS   = 0x18 / 4;
 constexpr int R_EVTS    = 0x1C / 4;
 constexpr int R_DROPS   = 0x20 / 4;
@@ -81,11 +86,21 @@ std::vector<uint32_t> get_event(volatile uint32_t *fifo)
     return w;
 }
 
+bool quiet = false;
+
 bool show(const std::vector<uint32_t> &w, uint64_t &prev_ts)
 {
     static const uint32_t tags[3] = {0xFEEDC0DE, 0xDECAFBAD, 0xF0F0F0F0};
     bool ok = w.size() == 7 && w[0] == 4 * w.size();
     uint64_t ts = 0;
+    for (int i = 0; ok && i < 3; i++)
+    {
+        ok = w[4 + i] == tags[i];
+    }
+    if (quiet && ok)
+    {
+        return true;
+    }
     if (w.size() >= 4)
     {
         ts = (uint64_t(w[2]) << 32) | w[1];
@@ -95,10 +110,6 @@ bool show(const std::vector<uint32_t> &w, uint64_t &prev_ts)
             printf("  +%.3f ms", (ts - prev_ts) / 125.0e3);
         }
         prev_ts = ts;
-    }
-    for (int i = 0; ok && i < 3; i++)
-    {
-        ok = w[4 + i] == tags[i];
     }
     if (!ok)
     {
@@ -120,8 +131,10 @@ int main(int argc, char *argv[])
     int soft = 0;
     double watch = 0;
     int period_ms = -1;
+    int mask = -1;
+    double pulser_hz = -1;
     int c;
-    while ((c = getopt(argc, argv, "cs:w:p:")) != -1)
+    while ((c = getopt(argc, argv, "cs:w:p:m:f:q")) != -1)
     {
         switch (c)
         {
@@ -129,8 +142,12 @@ int main(int argc, char *argv[])
         case 's': soft = atoi(optarg); break;
         case 'w': watch = atof(optarg); break;
         case 'p': period_ms = atoi(optarg); break;
+        case 'm': mask = int(strtol(optarg, nullptr, 0)); break;
+        case 'f': pulser_hz = atof(optarg); break;
+        case 'q': quiet = true; break;
         default:
-            fprintf(stderr, "usage: %s [-c] [-s n] [-w seconds] [-p period_ms]\n", argv[0]);
+            fprintf(stderr, "usage: %s [-c] [-s n] [-w seconds] [-p period_ms] [-m mask] [-f pulser_hz] [-q]\n",
+                    argv[0]);
             return 1;
         }
     }
@@ -157,6 +174,14 @@ int main(int argc, char *argv[])
     if (period_ms >= 0)
     {
         reg[R_PERIOD] = uint32_t(period_ms) * 125000;
+    }
+    if (pulser_hz > 0)
+    {
+        reg[R_PULSE] = uint32_t(125.0e6 / pulser_hz + 0.5);
+    }
+    if (mask >= 0)
+    {
+        reg[R_SRC] = uint32_t(mask);
     }
     if (clear)
     {
@@ -189,7 +214,9 @@ int main(int argc, char *argv[])
         }
     } while (now() < t_end || fifo[F_RDFO] != 0);
 
-    printf("%d events read, %d bad;  firmware counts: triggers %u  events %u  dropped %u  (train period %.3f ms)\n",
-           nev, bad, reg[R_TRIGS], reg[R_EVTS], reg[R_DROPS], reg[R_PERIOD] / 125.0e3);
+    printf("%d events read, %d bad;  firmware counts: triggers %u  events %u  dropped %u\n",
+           nev, bad, reg[R_TRIGS], reg[R_EVTS], reg[R_DROPS]);
+    printf("sources 0x%x, train period %.3f ms, pulser %.1f Hz\n", reg[R_SRC], reg[R_PERIOD] / 125.0e3,
+           125.0e6 / (reg[R_PULSE] ? reg[R_PULSE] : 1));
     return bad ? 2 : 0;
 }
