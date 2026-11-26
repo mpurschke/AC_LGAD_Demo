@@ -24,9 +24,14 @@ Every message starts with a 16-byte header, all fields little-endian:
 | 0x8003 | END | board → RCDAQ | u32 run, u32 reserved, u64 triggers, u64 events sent, u64 dropped |
 | 0x8010 | DATA | board → RCDAQ | u32 run, u32 board id, then the firmware event (below) |
 
-Types 0x0003-0x00FF and 0x8004-0x80FF are free for later commands (configuration, register
-access). There is no network command for the trigger sources or the pulser yet; START only
-enables the firmware and zeroes timestamp and counters, the source settings stay as they are.
+**Mode of operation:** RCDAQ does not configure the board. Its plugin only starts the
+data flow in `init()` (START) and ends it in `endrun()` (STOP), the same way the H2GCROC3
+plugin sends its start and stop sequences. The board is set up beforehand, outside RCDAQ
+(trigger sources, pulser rate, train period: `zdaq_dump` on the board), and RCDAQ takes what
+it finds. START enables the firmware and zeroes timestamp and counters; the settings stay
+as they are.
+
+Types 0x0003-0x00FF and 0x8004-0x80FF are free, e.g. for a STATUS query.
 
 ## Firmware event
 

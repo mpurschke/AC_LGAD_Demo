@@ -151,8 +151,14 @@ Board → RCDAQ:
 | 0x8010 | DATA  | see 4.3 |
 | 0x8003 | END   | u32 run number, u32 reserved, u64 triggers seen, u64 events sent, u64 events dropped |
 
-Type numbers 0x0003-0x00FF and 0x8004-0x80FF are kept free for later commands: STATUS,
-configuration and register access.
+Type numbers 0x0003-0x00FF and 0x8004-0x80FF are kept free for later commands, e.g. a
+STATUS query.
+
+RCDAQ does not configure the board: as in the H2GCROC3 plugin, `init()` only starts the
+data flow and `endrun()` ends it. The board is set up beforehand, outside RCDAQ (trigger
+sources, pulser rate: `zdaq_dump` on the board, later also a networked setup utility in this
+repo, separate from RCDAQ), and the
+run uses what it finds.
 
 ### 4.3 DATA payload (one frame = one trigger = one RCDAQ event)
 
