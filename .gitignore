@@ -14,3 +14,6 @@ xx.*
 
 # cross-compiled board tools
 sw/zdaq_dump
+sw/server/zdaq_server
+sw/server/zdaq_client
+sw/server/*.arm

@@ -156,16 +156,19 @@ configuration and register access.
 
 ### 4.3 DATA payload (one frame = one trigger = one RCDAQ event)
 
-| Offset | Type  | Field                                                  |
-|-------:|-------|--------------------------------------------------------|
-| 0      | u32   | run number                                             |
-| 4      | u32   | board ID                                               |
-| 8      | u32   | event number, from 0 at START                          |
-| 12     | u32   | flags: bit0 drops before this event, bit1 SYNC seen since START, bit2 role provider |
-| 16     | u64   | timestamp, 125 MHz ticks since SYNC                    |
-| 24     | u32   | number of data words N                                 |
-| 28     | u32   | reserved                                               |
-| 32     | u32[N]| data                                                   |
+| Offset | Type   | Field                                                  |
+|-------:|--------|--------------------------------------------------------|
+| 0      | u32    | run number                                             |
+| 4      | u32    | board ID                                               |
+| 8      | u32[7] | the firmware event, unchanged:                         |
+|        |        | length of the event in bytes (28)                      |
+|        |        | timestamp, u64, 125 MHz ticks (low word first)         |
+|        |        | packet counter = trigger number (a drop leaves a gap)  |
+|        |        | tags 0xFEEDC0DE, 0xDECAFBAD, 0xF0F0F0F0                |
+
+The firmware event carries its own length, so a later firmware with more data words
+needs no protocol change. Drops are not flagged per event; they show as gaps in the
+packet counter, and END reports the total.
 
 ### 4.4 Sequence
 
