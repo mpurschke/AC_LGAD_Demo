@@ -1,6 +1,8 @@
 // zdaq_server: TCP data server on a board (spec.md sections 4 and 5).
 //
-//   zdaq_server [--port 5555] [--source sim] [--rate 100] [--board-id 0]
+//   zdaq_server [--port 5555] [--source sim|axis] [--rate 100] [--board-id 0]
+//     sim : software events at --rate, board id from --board-id
+//     axis: the Zybo PL event FIFO (root); board id from the switches
 //
 // One client at a time (RCDAQ). A new connection replaces the old one: the
 // old one is closed and a running run stopped, so the board recovers by
@@ -11,6 +13,7 @@
 
 #include "net.h"
 #include "protocol.h"
+#include "axis_fifo_source.h"
 #include "sim_source.h"
 
 #include <arpa/inet.h>
@@ -300,7 +303,7 @@ void on_signal(int)
 
 void usage(const char *me)
 {
-    fprintf(stderr, "usage: %s [--port %d] [--source sim] [--rate triggers_per_s] [--board-id n]\n",
+    fprintf(stderr, "usage: %s [--port %d] [--source sim|axis] [--rate triggers_per_s] [--board-id n]\n",
             me, DEFAULT_PORT);
 }
 } // namespace
@@ -336,9 +339,20 @@ int main(int argc, char *argv[])
     {
         src = std::make_unique<SimSource>(rate, board_id);
     }
+    else if (source == "axis")
+    {
+        auto a = std::make_unique<AxisFifoSource>();
+        if (!a->error().empty())
+        {
+            fprintf(stderr, "axis source: %s\n", a->error().c_str());
+            return 1;
+        }
+        board_id = a->board_id();
+        src = std::move(a);
+    }
     else
     {
-        fprintf(stderr, "unknown source '%s' (only 'sim' so far)\n", source.c_str());
+        fprintf(stderr, "unknown source '%s' (sim or axis)\n", source.c_str());
         return 1;
     }
 
@@ -360,8 +374,15 @@ int main(int argc, char *argv[])
         perror("bind/listen");
         return 1;
     }
-    logmsg("listening on port %d, source %s (rate %g/s, board id %u)", port, source.c_str(), rate,
-           board_id);
+    if (source == "sim")
+    {
+        logmsg("listening on port %d, source sim (rate %g/s, board id %u)", port, rate, board_id);
+    }
+    else
+    {
+        logmsg("listening on port %d, source %s (firmware 0x%08x, board id %u)", port, source.c_str(),
+               src->firmware_version(), board_id);
+    }
 
     Server s(*src);
     while (!quit)

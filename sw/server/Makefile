@@ -6,9 +6,9 @@ CXXFLAGS = -std=c++20 -O2 -Wall -Wextra
 ARM_CXX ?= $(shell command -v arm-linux-gnueabihf-g++ 2>/dev/null || \
              echo /data/purschke/vivado_2024.2/Vitis/2024.2/gnu/aarch32/lin/gcc-arm-linux-gnueabi/bin/arm-linux-gnueabihf-g++)
 
-SERVER = zdaq_server.cc net.cc sim_source.cc
+SERVER = zdaq_server.cc net.cc sim_source.cc axis_fifo_source.cc
 CLIENT = zdaq_client.cc net.cc
-HEADERS = protocol.h net.h data_source.h sim_source.h
+HEADERS = protocol.h net.h data_source.h sim_source.h axis_fifo_source.h
 
 all: zdaq_server zdaq_client
 
